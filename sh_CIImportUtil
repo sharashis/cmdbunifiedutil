@@ -1,0 +1,92 @@
+var sh_CIImportUtil = Class.create();
+sh_CIImportUtil.prototype = {
+	initialize: function() {
+		this.MSDTABLE = 'u_cmdbciimport';
+		this.msg = [];
+		this.answer = {};
+		this.identifier = '';
+	},
+
+	importCI : function(payload){
+		try{	
+			this.identifier = payload.sender_identifier;
+			var ciData = payload.data.ci;
+
+			// Check for an empty request
+			if(Object.keys(payload).length === 0 && payload.constructor === Object){
+				this.answer.http_status = '400';
+				this.answer.status_message = 'Bad Request';
+				return this.answer;
+			}
+
+			//loop through the data
+			for(var i=0; i<ciData.length; i++){
+				if(ciData[i].ci_class == 'cmdb_ci_msd'){
+
+					//insert the record in the staging table
+					var resultSysID = this._postRecord(ciData[i],this.MSDTABLE);
+
+					//Get Import Set Row Object
+					var importSetRow = this._getImportSetRow(resultSysID, this.MSDTABLE);
+
+					// Get Import Set Row Status
+					var importSetRowStatus = importSetRow.getValue('sys_import_state');
+
+					//Set response based on the import set row status
+					this._setResponse(importSetRow,importSetRowStatus);	
+				}
+			}
+
+			this.answer.status_message = this.msg;
+			return this.answer;
+		}
+		catch(ex) {
+			this.answer.http_status = '500';
+			this.answer.status_message = 'Internal ServiceNow Error: ' + ex;
+			return this.answer;
+		}
+
+	},
+
+	_postRecord : function(j,table){
+		var postMSD = new GlideRecord(table);
+		postMSD.newRecord();
+		postMSD.setValue('u_name', j.name);
+		postMSD.setValue('u_correlation_id', j.correlation_id);
+		postMSD.setValue('u_discovery_source', j.discovery_source);
+		postMSD.setValue('u_company', j.company);
+		var recordSysID = postMSD.insert();
+		return recordSysID;
+	},
+
+	_getImportSetRow : function(rowID,table){
+		var importSetRow = new GlideRecord(table);
+		importSetRow.get(rowID);
+		return importSetRow;
+	},
+
+	_setResponse : function(row,status){
+		var tempObj = {};
+		if(status === 'inserted'){// If CI was inserted
+			tempObj.name = row.getValue('u_name');
+			tempObj.state = 'CI Inserted';
+			this.msg.push(tempObj);
+			this.answer.http_status = '201';
+		}
+		else if(status === 'ignored'){ //If CI was ignored
+			tempObj.name = row.getValue('u_name');
+			tempObj.state = row.getValue('sys_import_state_comment');
+			this.msg.push(tempObj);
+			this.answer.http_status = '200';
+		}
+
+		else if(status === 'updated'){
+			tempObj.name = row.getValue('u_name');
+			tempObj.state = 'CI updated';
+			this.msg.push(tempObj);
+			this.answer.http_status = '200';
+		}
+	},
+
+	type: 'sh_CIImportUtil'
+};
