@@ -1,92 +1,175 @@
 var sh_CIImportUtil = Class.create();
 sh_CIImportUtil.prototype = {
-	initialize: function() {
-		this.MSDTABLE = 'u_cmdbciimport';
-		this.msg = [];
-		this.answer = {};
-		this.identifier = '';
-	},
+    initialize: function () {
+        this.MSDTABLE = 'u_cmdb_msd_import';
+        this.RELTABLE = 'u_cmdbcirelimport';
+        this.msg = [];
+        this.answer = {};
+        this.identifier = '';
+    },
+    /**
+     * @param {object} Object containing the CI to be inserted
+     * @returns {object}  Object contaning the Import Set Name/CI Name/Operation carried out
+     */
+    importCI: function (payload) {
 
-	importCI : function(payload){
-		try{	
-			this.identifier = payload.sender_identifier;
-			var ciData = payload.data.ci;
+        try {
+            this.identifier = payload.sender_identifier;
+            var ciData = payload.data.ci;
 
-			// Check for an empty request
-			if(Object.keys(payload).length === 0 && payload.constructor === Object){
-				this.answer.http_status = '400';
-				this.answer.status_message = 'Bad Request';
-				return this.answer;
-			}
+            // Check for an empty request
+            if (this._isInvalidPayload(payload)) return this._returnInvalidPayloadError();
 
-			//loop through the data
-			for(var i=0; i<ciData.length; i++){
-				if(ciData[i].ci_class == 'cmdb_ci_msd'){
+            //loop through the data
+            for (var i = 0; i < ciData.length; i++) {
+                if (ciData[i].ci_class == 'cmdb_ci_msd') {
 
-					//insert the record in the staging table
-					var resultSysID = this._postRecord(ciData[i],this.MSDTABLE);
+                    //insert the record in the staging table
+                    var resultSysID = this._postCIRecord(ciData[i], this.MSDTABLE);
 
-					//Get Import Set Row Object
-					var importSetRow = this._getImportSetRow(resultSysID, this.MSDTABLE);
+                    //Get Import Set Row Object
+                    var importSetRow = this._getImportSetRow(resultSysID, this.MSDTABLE);
 
-					// Get Import Set Row Status
-					var importSetRowStatus = importSetRow.getValue('sys_import_state');
+                    // Get Import Set Row Status
+                    var importSetRowStatus = importSetRow.getValue('sys_import_state');
 
-					//Set response based on the import set row status
-					this._setResponse(importSetRow,importSetRowStatus);	
-				}
-			}
+                    //Set response based on the import set row status
+                    this._setResponse(importSetRow, importSetRowStatus);
+                }
+            }
 
-			this.answer.status_message = this.msg;
-			return this.answer;
-		}
-		catch(ex) {
-			this.answer.http_status = '500';
-			this.answer.status_message = 'Internal ServiceNow Error: ' + ex;
-			return this.answer;
-		}
+            this.answer.status_message = this.msg;
+            return this.answer;
 
-	},
+        } catch (ex) {
+            this.answer.http_status = '500';
+            this.answer.status_message = 'Internal ServiceNow Error: ' + ex;
+            return this.answer;
+        }
 
-	_postRecord : function(j,table){
-		var postMSD = new GlideRecord(table);
-		postMSD.newRecord();
-		postMSD.setValue('u_name', j.name);
-		postMSD.setValue('u_correlation_id', j.correlation_id);
-		postMSD.setValue('u_discovery_source', j.discovery_source);
-		postMSD.setValue('u_company', j.company);
-		var recordSysID = postMSD.insert();
-		return recordSysID;
-	},
+    },
+    /**
+     * @param {object} Object containing the CI relationship to be inserted
+     * @returns {object}  Object contaning the Import Set Name/Child/Parent/Relationship Name/Operation carried out
+     */
+    importRelationship: function (payload) {
 
-	_getImportSetRow : function(rowID,table){
-		var importSetRow = new GlideRecord(table);
-		importSetRow.get(rowID);
-		return importSetRow;
-	},
+        try {
+            this.identifier = payload.sender_identifier;
+            var relData = payload.data.relationships;
 
-	_setResponse : function(row,status){
-		var tempObj = {};
-		if(status === 'inserted'){// If CI was inserted
-			tempObj.name = row.getValue('u_name');
-			tempObj.state = 'CI Inserted';
-			this.msg.push(tempObj);
-			this.answer.http_status = '201';
-		}
-		else if(status === 'ignored'){ //If CI was ignored
-			tempObj.name = row.getValue('u_name');
-			tempObj.state = row.getValue('sys_import_state_comment');
-			this.msg.push(tempObj);
-			this.answer.http_status = '200';
-		}
+            // Check for an empty request
+            if (this._isInvalidPayload(payload)) return this._returnInvalidPayloadError();
 
-		else if(status === 'updated'){
-			tempObj.name = row.getValue('u_name');
-			tempObj.state = 'CI updated';
-			this.msg.push(tempObj);
-			this.answer.http_status = '200';
-		}
-	},
+            //loop through the data
+            for (var i = 0; i < relData.length; i++) {
 
-	type: 'sh_CIImportUtil'
+                //insert the record in the staging table
+                var resultSysID = this._postRelRecord(relData[i], this.RELTABLE);
+
+                //Get Import Set Row Object
+                var importSetRow = this._getImportSetRow(resultSysID, this.RELTABLE);
+
+                // Get Import Set Row Status
+                var importSetRowStatus = importSetRow.getValue('sys_import_state');
+
+                //Set response based on the import set row status
+                this._setResponse(importSetRow, importSetRowStatus);
+
+            }
+
+            this.answer.status_message = this.msg;
+            return this.answer;
+
+        } catch (ex) {
+            this.answer.http_status = '500';
+            this.answer.status_message = 'Internal ServiceNow Error: ' + ex;
+            return this.answer;
+        }
+
+    },
+    /**
+     * @param {object} Check if the passed argument is an object or not
+     * @returns {boolean}  Returns true/false based on the input
+     */
+    _isInvalidPayload: function (o) {
+        return Object.keys(o).length === 0 && o.constructor === Object;
+    },
+    /**
+     * @returns {object}  Returns a generic bad request error
+     */
+    _returnInvalidPayloadError: function () {
+        this.answer.http_status = '400';
+        this.answer.status_message = 'Bad Request';
+        return this.answer;
+    },
+    /**
+     * @param {object} row contains the data from current loop iteration
+     * @param {string} table contains the name of the table where data has to be inserted
+     * @returns {string}  Returns the sys_id of the record in the Import Set Table
+     */
+    _postCIRecord: function (row, table) {
+        var postMSD = new GlideRecord(table);
+        postMSD.newRecord();
+        postMSD.setValue('u_name', row.name);
+        postMSD.setValue('u_correlation_id', row.correlation_id);
+        postMSD.setValue('u_discovery_source', row.discovery_source);
+        postMSD.setValue('u_company', row.company);
+        var recordSysID = postMSD.insert();
+        return recordSysID;
+    },
+    /**
+     * @param {object} row contains the data from current loop iteration
+     * @param {string} table contains the name of the table where data has to be inserted
+     * @returns {string}  Returns the sys_id of the record in the Import Set Table
+     */
+    _postRelRecord: function (row, table) {
+        var postRel = new GlideRecord(table);
+        postRel.newRecord();
+        postRel.setValue('u_child', row.child);
+        postRel.setValue('u_parent', row.parent);
+        postRel.setValue('u_type', row.type);
+        postRel.setValue('u_discovery_source', row.discovery_source);
+        var recordSysID = postRel.insert();
+        return recordSysID;
+    },
+    /**
+     * @param {string} rowID contains the sys_id of the record
+     * @param {string} table contains the name of the table where data has to be inserted
+     * @returns {string}  Returns the complete row record
+     */
+    _getImportSetRow: function (rowID, table) {
+        var importSetRow = new GlideRecord(table);
+        importSetRow.get(rowID);
+        return importSetRow;
+    },
+    /**
+     * @param {object} row contains the complete row record gr
+     * @param {string} status contains the import set row status(inserted, updated, ignored)
+     * @returns {NA}  Sets the answer object to be passed as a response
+     */
+    _setResponse: function (row, status) {
+        var tempObj = {};
+        if (status === 'inserted') { // If a record was inserted
+            tempObj.name = row.getValue('u_name') || row.getValue('u_parent') + ' ' + row.getValue('u_type') + ' ' + row.getValue('u_child');
+            tempObj.importsetname = row.getDisplayValue('sys_import_set');
+            tempObj.state = 'Inserted';
+            this.msg.push(tempObj);
+            this.answer.http_status = '201';
+        } else if (status === 'ignored') { //If a record was ignored
+            tempObj.name = row.getValue('u_name') || row.getValue('u_parent') + ' ' + row.getValue('u_type') + ' ' + row.getValue('u_child');
+            tempObj.importsetname = row.getDisplayValue('sys_import_set');
+            tempObj.state = row.getValue('sys_import_state_comment');
+            this.msg.push(tempObj);
+            this.answer.http_status = '200';
+        } else if (status === 'updated') { // If a record was updated
+            tempObj.name = row.getValue('u_name') || row.getValue('u_parent') + ' ' + row.getValue('u_type') + ' ' + row.getValue('u_child');
+            tempObj.importsetname = row.getDisplayValue('sys_import_set');
+            tempObj.state = 'Updated';
+            this.msg.push(tempObj);
+            this.answer.http_status = '200';
+        }
+    },
+
+    type: 'sh_CIImportUtil'
 };
